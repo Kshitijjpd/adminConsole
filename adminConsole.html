@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin Console</title>
+  <style>
+    /* Base styles */
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+      background-color: #121212;
+      color: #ffffff;
+    }
+
+    .button-container, .filter-container {
+      margin-bottom: 20px;
+    }
+
+    button, select {
+      padding: 10px 15px;
+      margin-right: 10px;
+      cursor: pointer;
+    }
+
+    /* Theme Toggle Button in the top-right corner */
+    .theme-toggle-container {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+    }
+
+    .mode-toggle {
+      background-color: #333;
+      color: #fff;
+      border: none;
+      padding: 10px 15px;
+      cursor: pointer;
+    }
+
+    body.light-mode .mode-toggle {
+      background-color: #e0e0e0;
+      color: #000;
+    }
+
+    /* Table styles */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 20px;
+    }
+
+    th, td {
+      padding: 10px;
+      border: 1px solid #ccc;
+      text-align: left;
+    }
+
+    .details {
+      display: none;
+      background-color: #333;
+      color: #fff;
+    }
+
+    /* Light Mode */
+    body.light-mode {
+      background-color: #ffffff;
+      color: #000000;
+    }
+
+    body.light-mode .details {
+      background-color: #f1f1f1;
+      color: #333;
+    }
+  </style>
+</head>
+<body>
+
+<!-- Toggle Mode Button positioned in the top-right corner -->
+<div class="theme-toggle-container">
+  <button class="mode-toggle" onclick="toggleMode()">Toggle Mode</button>
+</div>
+
+<div class="button-container">
+  <button onclick="loadData('Trove')">Trove</button>
+  <button onclick="loadData('Redeem')">Redeem</button>
+  <button onclick="loadData('Stake')">Stake</button>
+  <button onclick="loadData('Liquidate')">Liquidate</button>
+  <button onclick="loadData('Position')">Position</button>
+</div>
+
+<div class="filter-container" id="assetFilterContainer" style="display: none;">
+  <label for="assetFilter">Filter by Asset:</label>
+  <select id="assetFilter" onchange="applyAssetFilter()">
+    <option value="all">All Assets</option>
+  </select>
+</div>
+
+<table id="transactionTable">
+  <thead id="tableHead">
+    <!-- Headers will be dynamically generated -->
+  </thead>
+  <tbody id="transactionBody">
+    <!-- Rows will be populated here -->
+  </tbody>
+</table>
+
+<script>
+  // Define API configurations for each button
+  const apiConfig = {
+    "Trove": {
+      url: "http://34.170.86.192/admin/trove",
+      displayFields: ["walletaddress", "timestamp", "operation", "debt", "coll"],
+      detailFields: ["operation", "timestamp", "walletaddress", "transactionhash", "debt", "coll"],
+      filterField: "asset"
+    },
+    "Redeem": {
+      url: "http://34.170.86.192/admin/redeem",
+      displayFields: ["transactionhash", "timestamp"],
+      detailFields: ["timestamp", "asset", "attempteddebtamount", "actualdebtamount", "collsent"],
+      filterField: "asset"
+    },
+    "Stake": {
+      url: "http://34.170.86.192/admin/stake",
+      displayFields: ["transactionhash", "timestamp"],
+      detailFields: ["timestamp", "depositer", "transactionhash", "newdeposit"]
+    },
+    "Liquidate": {
+      url: "http://34.170.86.192/admin/liquidate",
+      displayFields: ["walletaddress", "timestamp", "operation"],
+      detailFields: ["timestamp", "asset", "transactionhash", "walletaddress", "debt", "coll", "operation"],
+      filterField: "asset"
+    },
+    "Position": {
+      url: "http://34.170.86.192/admin/position",
+      displayFields: ["position", "walletaddress", "nltv"],
+      detailFields: ["position", "walletaddress", "asset", "debt", "coll", "nltv", "status"],
+      filterField: "asset"
+    }
+  };
+
+  let currentData = [];  // Stores the latest data loaded for filtering purposes
+  let currentFilterField = null; // Stores the current filter field name for dynamic filtering
+  let currentType = null;  // Track the currently loaded data type
+
+  // Function to load data from the selected API endpoint
+  async function loadData(type) {
+    const config = apiConfig[type];
+    if (!config) {
+      console.error("Invalid API type selected.");
+      return;
+    }
+
+    // Set the current type and filter field
+    currentType = type;
+    currentFilterField = config.filterField || null;
+    document.getElementById('assetFilterContainer').style.display = currentFilterField ? 'block' : 'none';
+
+    try {
+      const response = await fetch(config.url);
+      const data = await response.json();
+      currentData = data;  // Store data for filtering
+
+      // Populate asset filter options dynamically if a filterField exists
+      if (currentFilterField) {
+        populateAssetFilter(data, currentFilterField);
+      }
+      
+      populateTable(data, config.displayFields, config.detailFields);
+    } catch (error) {
+      console.error(`Error fetching data for ${type}:`, error);
+    }
+  }
+
+  // Function to populate asset filter with unique asset options
+  function populateAssetFilter(data, filterField) {
+    const assetFilter = document.getElementById('assetFilter');
+    assetFilter.innerHTML = '<option value="all">All Assets</option>';
+
+    // Get unique values based on filterField
+    const uniqueAssets = [...new Set(data.map(item => item[filterField]).filter(asset => asset))];
+    
+    // Create an option element for each unique value
+    uniqueAssets.forEach(asset => {
+      const option = document.createElement('option');
+      option.value = asset;
+      option.textContent = asset;
+      assetFilter.appendChild(option);
+    });
+  }
+
+  // Function to apply asset filter
+  function applyAssetFilter() {
+    const selectedAsset = document.getElementById('assetFilter').value;
+    const filteredData = selectedAsset === 'all'
+      ? currentData
+      : currentData.filter(item => item[currentFilterField] === selectedAsset);
+
+    // Use currentType to access the correct displayFields and detailFields dynamically
+    const config = apiConfig[currentType];
+    populateTable(filteredData, config.displayFields, config.detailFields);
+  }
+
+  // Function to dynamically populate the table
+  function populateTable(data, displayFields, detailFields) {
+    const tableHead = document.getElementById('tableHead');
+    const tableBody = document.getElementById('transactionBody');
+
+    // Clear existing table content
+    tableHead.innerHTML = '';
+    tableBody.innerHTML = '';
+
+    // Create table headers dynamically
+    const headerRow = document.createElement('tr');
+    displayFields.forEach(field => {
+      const th = document.createElement('th');
+      th.textContent = field.charAt(0).toUpperCase() + field.slice(1);
+      headerRow.appendChild(th);
+    });
+    tableHead.appendChild(headerRow);
+
+    // Populate table rows
+    data.forEach((item, index) => {
+      const row = document.createElement('tr');
+
+      displayFields.forEach(field => {
+        const td = document.createElement('td');
+        td.textContent = item[field] !== undefined ? item[field] : 'N/A';
+        row.appendChild(td);
+      });
+
+      // Click event to toggle the details row
+      row.addEventListener('click', () => {
+        const detailsRow = document.getElementById(`details-${index}`);
+        detailsRow.style.display = detailsRow.style.display === 'none' ? 'table-row' : 'none';
+      });
+      tableBody.appendChild(row);
+
+      // Create a details row
+      const detailsRow = document.createElement('tr');
+      detailsRow.id = `details-${index}`;
+      detailsRow.classList.add('details');
+      const detailContent = detailFields.map(field => 
+        `<strong>${field}:</strong> ${item[field] !== undefined ? item[field] : 'N/A'}`
+      ).join('<br>');
+      detailsRow.innerHTML = `<td colspan="${displayFields.length}">${detailContent}</td>`;
+      tableBody.appendChild(detailsRow);
+    });
+  }
+
+  // Function to toggle between dark and light modes
+  function toggleMode() {
+    document.body.classList.toggle('light-mode');
+  }
+</script>
+
+</body>
+</html>
